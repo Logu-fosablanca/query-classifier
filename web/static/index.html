@@ -1,0 +1,1333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Intent Classifier · REIC Demo</title>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'ui-sans-serif', 'system-ui'],
+            mono: ['JetBrains Mono', 'ui-monospace', 'Menlo'],
+          },
+        },
+      },
+    };
+  </script>
+
+  <!-- Alpine.js -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+  <style>
+    [x-cloak] { display: none !important; }
+
+    /* ── Scrollbar ───────────────────────────────────────────────────────── */
+    .scroll-thin::-webkit-scrollbar { width: 4px; height: 4px; }
+    .scroll-thin::-webkit-scrollbar-track { background: transparent; }
+    .scroll-thin::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 4px; }
+    .scroll-thin::-webkit-scrollbar-thumb:hover { background: #9CA3AF; }
+
+    /* ── Entry animations ───────────────────────────────────────────────── */
+    @keyframes card-enter {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes bubble-enter {
+      from { opacity: 0; transform: translateX(8px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+    @keyframes fade-in {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+    .card-enter   { animation: card-enter   280ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+    .bubble-enter { animation: bubble-enter 200ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+    .fade-in      { animation: fade-in      180ms ease both; }
+
+    /* ── Bounce loader ──────────────────────────────────────────────────── */
+    @keyframes bounce-dot {
+      0%, 80%, 100% { transform: translateY(0);   opacity: 1; }
+      40%           { transform: translateY(-7px); opacity: .7; }
+    }
+    .dot-1 { animation: bounce-dot 1.4s cubic-bezier(.4,0,.6,1) 0.00s infinite; }
+    .dot-2 { animation: bounce-dot 1.4s cubic-bezier(.4,0,.6,1) 0.16s infinite; }
+    .dot-3 { animation: bounce-dot 1.4s cubic-bezier(.4,0,.6,1) 0.32s infinite; }
+
+    /* ── Confidence bar fill ────────────────────────────────────────────── */
+    .conf-fill { transition: width 600ms cubic-bezier(0.16, 1, 0.3, 1); }
+
+    /* ── Spinner ────────────────────────────────────────────────────────── */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spin { animation: spin .7s linear infinite; }
+
+    /* ── Pipeline pulse while loading ──────────────────────────────────── */
+    @keyframes pipeline-pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: .4; }
+    }
+    .pipeline-node-pulse { animation: pipeline-pulse 1.3s ease-in-out infinite; }
+
+    /* ── Misc ───────────────────────────────────────────────────────────── */
+    .chevron-open { transform: rotate(90deg); }
+    textarea { resize: none; }
+    ::placeholder { font-style: normal; }
+    input[type=password] { letter-spacing: 0.12em; }
+    .send-btn:active:not(:disabled) { transform: scale(.95); }
+  </style>
+</head>
+
+<!-- ═══════════════════════════════════════════════════════════ ROOT DATA ═══ -->
+<body class="bg-slate-50 text-neutral-900 font-sans antialiased overflow-hidden"
+      x-data="app()" x-cloak>
+
+<!-- ══════════════════════════════════════════════════════════════ HEADER ═══ -->
+<header class="fixed inset-x-0 top-0 z-30 h-14 bg-white border-b border-neutral-200
+               flex items-center px-5 gap-4">
+
+  <!-- Logo + title -->
+  <div class="flex items-center gap-3 flex-shrink-0">
+    <div class="w-7 h-7 bg-indigo-600 rounded-lg flex items-center justify-center">
+      <svg class="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round"
+              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2
+                 M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+      </svg>
+    </div>
+    <div class="leading-tight">
+      <p class="text-[13px] font-semibold text-neutral-900">Intent Classifier</p>
+      <p class="text-[10px] text-neutral-400 tracking-wider">REIC — RAG-Enhanced Classification</p>
+    </div>
+  </div>
+
+  <div class="flex-1"></div>
+
+  <!-- Active pills -->
+  <div class="flex items-center gap-2">
+    <span class="text-[10px] font-bold px-2.5 py-1 rounded-full transition-colors duration-150"
+          :class="{
+            'bg-blue-100 text-blue-700':     cfg.mode === 'flat',
+            'bg-violet-100 text-violet-700': cfg.mode === 'flat_rag',
+            'bg-emerald-100 text-emerald-700': cfg.mode === 'hierarchical_rag',
+          }"
+          x-text="modeLabelFull(cfg.mode)"></span>
+    <span class="text-[10px] font-bold px-2.5 py-1 rounded-full transition-colors duration-150"
+          :class="cfg.turnMode === 'multi'
+            ? 'bg-amber-100 text-amber-800'
+            : 'bg-neutral-100 text-neutral-500'"
+          x-text="cfg.turnMode.toUpperCase() + '-TURN'"></span>
+  </div>
+</header>
+
+<!-- ══════════════════════════════════════════════════════════════ LAYOUT ════ -->
+<div class="flex pt-14" style="height:100vh">
+
+  <!-- ═══════════════════════════════════════════════════════ SIDEBAR ════ -->
+  <aside class="w-[360px] flex-shrink-0 bg-white border-r border-neutral-200
+                flex flex-col overflow-hidden">
+
+    <!-- Section 1: Mode + TurnMode + Dirty notice -->
+    <div class="p-4 space-y-3 border-b border-neutral-100 flex-shrink-0">
+
+      <!-- Mode -->
+      <div>
+        <p class="text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1.5">Mode</p>
+        <div class="grid grid-cols-3 gap-1 bg-neutral-100 rounded-xl p-1">
+          <template x-for="m in modes" :key="m.value">
+            <button @click="cfg.mode = m.value; onCfgChange()"
+                    class="text-[11px] font-semibold h-7 rounded-lg transition-all duration-150"
+                    :class="cfg.mode === m.value
+                      ? 'bg-white shadow text-indigo-700'
+                      : 'text-neutral-400 hover:text-neutral-600'"
+                    x-text="m.label"></button>
+          </template>
+        </div>
+      </div>
+
+      <!-- Turn Mode -->
+      <div>
+        <p class="text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1.5">Turn Mode</p>
+        <div class="grid grid-cols-2 gap-1 bg-neutral-100 rounded-xl p-1">
+          <button @click="cfg.turnMode = 'single'"
+                  class="text-[11px] font-semibold h-7 rounded-lg transition-all duration-150"
+                  :class="cfg.turnMode === 'single'
+                    ? 'bg-white shadow text-indigo-700'
+                    : 'text-neutral-400 hover:text-neutral-600'">
+            Single-Turn
+          </button>
+          <button @click="cfg.turnMode = 'multi'"
+                  class="text-[11px] font-semibold h-7 rounded-lg transition-all duration-150"
+                  :class="cfg.turnMode === 'multi'
+                    ? 'bg-white shadow text-amber-700'
+                    : 'text-neutral-400 hover:text-neutral-600'">
+            Multi-Turn
+          </button>
+        </div>
+      </div>
+
+      <!-- Dirty notice -->
+      <div x-show="cfgDirty" x-transition:enter="transition ease-out duration-200"
+           x-transition:enter-start="opacity-0 -translate-y-1"
+           x-transition:enter-end="opacity-100 translate-y-0"
+           class="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+        <svg class="w-3 h-3 text-amber-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75
+               1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0
+               11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+                clip-rule="evenodd"/>
+        </svg>
+        <span class="text-[11px] text-amber-700">Router will rebuild on next query</span>
+      </div>
+    </div>
+
+    <!-- Section 2: Tab bar -->
+    <div class="flex border-b border-neutral-100 flex-shrink-0">
+      <template x-for="tab in computedTabs" :key="tab.id">
+        <button @click="!tab.locked && (activeTab = tab.id)"
+                :title="tab.locked ? tab.lockedMsg : ''"
+                class="flex-1 flex items-center justify-center gap-1 h-10 text-[11px] font-semibold
+                       border-b-2 transition-all duration-150"
+                :class="{
+                  'border-indigo-600 text-indigo-600':                       activeTab === tab.id,
+                  'border-transparent text-neutral-400 hover:text-neutral-600': activeTab !== tab.id && !tab.locked,
+                  'border-transparent text-neutral-300 cursor-not-allowed':  tab.locked,
+                }">
+          <span x-text="tab.label"></span>
+          <!-- Lock icon for locked tabs -->
+          <svg x-show="tab.locked" class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+            <path stroke-linecap="round" stroke-linejoin="round"
+                  d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0
+                     002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+          </svg>
+          <!-- Count badge -->
+          <span x-show="tab.count !== null" class="text-[9px] text-neutral-300 font-normal"
+                x-text="'(' + tab.count + ')'"></span>
+        </button>
+      </template>
+    </div>
+
+    <!-- Section 3: Tab content (scrollable) -->
+    <div class="flex-1 overflow-y-auto scroll-thin">
+
+      <!-- ── LLM tab ───────────────────────────────────────────────────── -->
+      <div x-show="activeTab === 'llm'" class="p-4 space-y-4 fade-in">
+
+        <!-- Provider toggle — 3 way -->
+        <div>
+          <p class="text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1.5">Provider</p>
+          <div class="grid grid-cols-3 gap-1 bg-neutral-100 rounded-xl p-1">
+            <button @click="cfg.llmProvider = 'openai'; ollamaModels = []; openrouterModels = []"
+                    class="text-[11px] font-semibold h-7 rounded-lg transition-all duration-150"
+                    :class="cfg.llmProvider === 'openai'
+                      ? 'bg-white shadow text-indigo-700' : 'text-neutral-400 hover:text-neutral-600'">
+              OpenAI
+            </button>
+            <button @click="cfg.llmProvider = 'openrouter'; cfg.llmBaseUrl = 'https://openrouter.ai/api'; ollamaModels = []; fetchOpenRouterModels()"
+                    class="text-[11px] font-semibold h-7 rounded-lg transition-all duration-150"
+                    :class="cfg.llmProvider === 'openrouter'
+                      ? 'bg-white shadow text-violet-700' : 'text-neutral-400 hover:text-neutral-600'">
+              OpenRouter
+            </button>
+            <button @click="cfg.llmProvider = 'ollama'; cfg.llmBaseUrl = 'http://localhost:11434'; openrouterModels = []; fetchOllamaModels()"
+                    class="text-[11px] font-semibold h-7 rounded-lg transition-all duration-150"
+                    :class="cfg.llmProvider === 'ollama'
+                      ? 'bg-white shadow text-indigo-700' : 'text-neutral-400 hover:text-neutral-600'">
+              Ollama
+            </button>
+          </div>
+        </div>
+
+        <!-- Fields -->
+        <div class="space-y-3">
+
+          <!-- Base URL — hidden for OpenRouter (endpoint is fixed) -->
+          <div x-show="cfg.llmProvider !== 'openrouter'">
+            <label class="text-[11px] font-semibold text-neutral-500 block mb-1">Base URL</label>
+            <div class="flex gap-2">
+              <input x-model="cfg.llmBaseUrl" type="text"
+                     :placeholder="cfg.llmProvider === 'ollama' ? 'http://localhost:11434' : 'https://api.openai.com'"
+                     class="flex-1 text-xs border border-neutral-200 rounded-[10px] px-3 py-2.5
+                            focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent
+                            transition-shadow duration-150">
+              <!-- Re-fetch button for Ollama -->
+              <button x-show="cfg.llmProvider === 'ollama'"
+                      @click="fetchOllamaModels()"
+                      :disabled="ollamaModelsLoading"
+                      title="Reload models from Ollama"
+                      class="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-[10px]
+                             border border-neutral-200 bg-neutral-50 hover:bg-indigo-50
+                             hover:border-indigo-300 disabled:opacity-40 transition-all duration-150">
+                <svg x-show="!ollamaModelsLoading" class="w-3.5 h-3.5 text-neutral-500"
+                     fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                  <path stroke-linecap="round" stroke-linejoin="round"
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11
+                           4v5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                <svg x-show="ollamaModelsLoading" class="w-3.5 h-3.5 text-indigo-500 spin"
+                     fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <!-- OpenRouter: fixed endpoint badge + re-fetch -->
+          <div x-show="cfg.llmProvider === 'openrouter'"
+               class="flex items-center justify-between px-3 py-2 bg-violet-50 border border-violet-100 rounded-[10px]">
+            <div>
+              <p class="text-[10px] font-semibold text-violet-700">openrouter.ai/api/v1</p>
+              <p class="text-[9px] text-violet-400 mt-0.5">Endpoint is fixed — no configuration needed</p>
+            </div>
+            <button @click="fetchOpenRouterModels()"
+                    :disabled="openrouterModelsLoading"
+                    title="Reload model list from OpenRouter"
+                    class="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-lg
+                           bg-white border border-violet-200 hover:border-violet-400
+                           disabled:opacity-40 transition-all duration-150">
+              <svg x-show="!openrouterModelsLoading" class="w-3.5 h-3.5 text-violet-500"
+                   fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11
+                         4v5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+              </svg>
+              <svg x-show="openrouterModelsLoading" class="w-3.5 h-3.5 text-violet-400 spin"
+                   fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+              </svg>
+            </button>
+          </div>
+
+          <!-- Model -->
+          <div>
+            <div class="flex items-center justify-between mb-1.5">
+              <label class="text-[11px] font-semibold text-neutral-500">Model</label>
+              <span x-show="cfg.llmProvider === 'ollama' && ollamaModels.length > 0"
+                    class="text-[10px] text-neutral-400"
+                    x-text="ollamaModels.length + ' available'"></span>
+              <span x-show="cfg.llmProvider === 'openrouter' && openrouterModels.length > 0"
+                    class="text-[10px] text-neutral-400"
+                    x-text="openrouterModels.length + ' models · ' + openrouterFreeCount + ' free'"></span>
+            </div>
+
+            <!-- Loading state (shared) -->
+            <div x-show="(cfg.llmProvider === 'ollama' && ollamaModelsLoading) || (cfg.llmProvider === 'openrouter' && openrouterModelsLoading)"
+                 class="flex items-center gap-2 px-3 py-2.5 border border-neutral-200 rounded-[10px] bg-neutral-50">
+              <svg class="w-3.5 h-3.5 text-indigo-400 spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+              </svg>
+              <span class="text-xs text-neutral-400"
+                    x-text="cfg.llmProvider === 'ollama' ? 'Loading from Ollama…' : 'Loading from OpenRouter…'"></span>
+            </div>
+
+            <!-- Ollama: model chips -->
+            <div x-show="cfg.llmProvider === 'ollama' && !ollamaModelsLoading && ollamaModels.length > 0"
+                 class="flex flex-wrap gap-1.5">
+              <template x-for="m in ollamaModels" :key="m">
+                <button @click="cfg.llmModelName = m"
+                        class="text-[11px] font-mono px-2.5 py-1.5 rounded-lg border transition-all duration-150"
+                        :class="cfg.llmModelName === m
+                          ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                          : 'bg-white border-neutral-200 text-neutral-600 hover:border-indigo-300 hover:text-indigo-600'"
+                        x-text="m"></button>
+              </template>
+            </div>
+
+            <!-- OpenRouter: model chips (scrollable) -->
+            <div x-show="cfg.llmProvider === 'openrouter' && !openrouterModelsLoading && openrouterModels.length > 0"
+                 class="max-h-40 overflow-y-auto scroll-thin flex flex-wrap gap-1.5 pr-1">
+              <template x-for="m in openrouterModels" :key="m">
+                <button @click="cfg.llmModelName = m"
+                        class="text-[11px] font-mono px-2.5 py-1.5 rounded-lg border transition-all duration-150 flex-shrink-0"
+                        :class="cfg.llmModelName === m
+                          ? 'bg-violet-600 border-violet-600 text-white shadow-sm'
+                          : 'bg-white border-neutral-200 text-neutral-600 hover:border-violet-300 hover:text-violet-600'"
+                        x-text="m"></button>
+              </template>
+            </div>
+
+            <!-- Error state (shared) -->
+            <div x-show="(cfg.llmProvider === 'ollama' && !ollamaModelsLoading && ollamaFetchError) ||
+                          (cfg.llmProvider === 'openrouter' && !openrouterModelsLoading && openrouterFetchError)"
+                 class="flex items-start gap-2 px-3 py-2.5 border border-red-100 rounded-[10px] bg-red-50">
+              <svg class="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0
+                     00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293
+                     1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10
+                     8.586 8.707 7.293z" clip-rule="evenodd"/>
+              </svg>
+              <div>
+                <p class="text-[11px] text-red-600 font-semibold"
+                   x-text="cfg.llmProvider === 'ollama' ? 'Ollama not reachable' : 'OpenRouter error'"></p>
+                <p class="text-[10px] text-red-400 mt-0.5"
+                   x-text="cfg.llmProvider === 'ollama' ? ollamaFetchError : openrouterFetchError"></p>
+              </div>
+            </div>
+
+            <!-- Ollama idle (no models yet) -->
+            <div x-show="cfg.llmProvider === 'ollama' && !ollamaModelsLoading && !ollamaFetchError && ollamaModels.length === 0"
+                 class="px-3 py-2.5 border border-dashed border-neutral-200 rounded-[10px] text-center">
+              <p class="text-[11px] text-neutral-400">No models — make sure Ollama is running</p>
+              <button @click="fetchOllamaModels()"
+                      class="mt-1 text-[11px] font-semibold text-indigo-500 hover:text-indigo-700 transition-colors duration-150">
+                Try again
+              </button>
+            </div>
+
+            <!-- OpenRouter idle (no models yet) -->
+            <div x-show="cfg.llmProvider === 'openrouter' && !openrouterModelsLoading && !openrouterFetchError && openrouterModels.length === 0"
+                 class="px-3 py-2.5 border border-dashed border-neutral-200 rounded-[10px] text-center">
+              <p class="text-[11px] text-neutral-400">Enter your API key then fetch models</p>
+              <button @click="fetchOpenRouterModels()"
+                      class="mt-1 text-[11px] font-semibold text-violet-500 hover:text-violet-700 transition-colors duration-150">
+                Fetch models
+              </button>
+            </div>
+
+            <!-- OpenAI: plain text input -->
+            <input x-show="cfg.llmProvider === 'openai'"
+                   x-model="cfg.llmModelName" type="text" placeholder="gpt-4o-mini"
+                   class="w-full text-xs border border-neutral-200 rounded-[10px] px-3 py-2.5
+                          focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent
+                          transition-shadow duration-150">
+          </div>
+
+          <!-- API Key -->
+          <div x-show="cfg.llmProvider !== 'ollama' || cfg.llmApiKey">
+            <label class="text-[11px] font-semibold text-neutral-500 block mb-1">API Key</label>
+            <input x-model="cfg.llmApiKey" type="password"
+                   :placeholder="cfg.llmProvider === 'openrouter' ? 'sk-or-…' : 'sk-…'"
+                   @change="cfg.llmProvider === 'openrouter' && fetchOpenRouterModels()"
+                   class="w-full text-xs border border-neutral-200 rounded-[10px] px-3 py-2.5
+                          focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent
+                          transition-shadow duration-150 font-mono tracking-widest">
+            <p class="mt-1.5 text-[10px] text-neutral-400"
+               x-show="cfg.llmProvider === 'openai'">Sent only to your configured endpoint.</p>
+            <p class="mt-1.5 text-[10px] text-violet-400"
+               x-show="cfg.llmProvider === 'openrouter'">
+              Get a free key at <span class="font-semibold">openrouter.ai/keys</span>. Free models work without a key.
+            </p>
+          </div>
+          <button x-show="cfg.llmProvider === 'ollama' && !cfg.llmApiKey"
+                  @click="cfg.llmApiKey = ' '; $nextTick(() => cfg.llmApiKey = '')"
+                  class="text-[11px] text-neutral-400 hover:text-neutral-600 transition-colors duration-150">
+            + Add auth token (optional)
+          </button>
+
+        </div>
+
+        <!-- Presets -->
+        <div>
+          <p class="text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-2">Quick Presets</p>
+          <div class="space-y-1.5">
+            <template x-for="p in llmPresets" :key="p.label">
+              <button @click="applyPreset(p)"
+                      class="group w-full flex items-center justify-between px-3 py-2.5 text-left
+                             bg-neutral-50 rounded-lg transition-all duration-150
+                             hover:bg-indigo-50 active:scale-[.98]">
+                <span class="text-xs font-semibold text-neutral-700 group-hover:text-indigo-700 transition-colors duration-150"
+                      x-text="p.label"></span>
+                <span class="text-[11px] text-neutral-400 group-hover:text-indigo-400 transition-colors duration-150 font-mono"
+                      x-text="p.model"></span>
+              </button>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Intents tab ───────────────────────────────────────────────── -->
+      <div x-show="activeTab === 'intents'" class="p-4 fade-in">
+        <div class="flex items-center justify-between mb-3">
+          <p class="text-[10px] font-bold text-neutral-400 uppercase tracking-widest">
+            Intents (<span x-text="intents.length"></span>)
+          </p>
+          <button @click="addIntent()"
+                  class="flex items-center gap-1 text-xs font-semibold text-indigo-600
+                         hover:text-indigo-800 transition-colors duration-150">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+            </svg>
+            Add intent
+          </button>
+        </div>
+        <div class="space-y-2">
+          <template x-for="(intent, idx) in intents" :key="idx">
+            <div class="border border-neutral-100 bg-neutral-50 rounded-xl p-3 space-y-2">
+              <div class="flex items-center gap-2">
+                <input x-model="intent.name" @input="onCfgChange()" type="text"
+                       placeholder="intent_name"
+                       class="flex-1 text-xs font-mono bg-white border border-neutral-200 rounded-lg
+                              px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400
+                              transition-shadow duration-150">
+                <button @click="removeIntent(idx)"
+                        class="text-neutral-300 hover:text-red-400 transition-colors duration-150 flex-shrink-0">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+                  </svg>
+                </button>
+              </div>
+              <textarea x-model="intent.description" @input="onCfgChange()"
+                        placeholder="Describe what this intent means…" rows="2"
+                        class="w-full text-xs bg-white border border-neutral-200 rounded-lg
+                               px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400
+                               transition-shadow duration-150"></textarea>
+            </div>
+          </template>
+        </div>
+        <button @click="resetIntents()"
+                class="mt-4 w-full text-[11px] text-neutral-400 hover:text-neutral-600 py-2
+                       border border-dashed border-neutral-200 hover:border-neutral-400
+                       rounded-xl transition-all duration-150">
+          Reset to banking defaults
+        </button>
+      </div>
+
+      <!-- ── Hierarchy tab ─────────────────────────────────────────────── -->
+      <div x-show="activeTab === 'hierarchy'" class="p-4 fade-in">
+        <div class="flex items-center justify-between mb-3">
+          <p class="text-[10px] font-bold text-neutral-400 uppercase tracking-widest">
+            Categories (<span x-text="hierarchyList.length"></span>)
+          </p>
+          <button @click="addCategory()"
+                  class="flex items-center gap-1 text-xs font-semibold text-indigo-600
+                         hover:text-indigo-800 transition-colors duration-150">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+            </svg>
+            Add category
+          </button>
+        </div>
+        <div class="space-y-2">
+          <template x-for="(cat, idx) in hierarchyList" :key="cat.name + idx">
+            <div class="border border-neutral-100 bg-neutral-50 rounded-xl p-3 space-y-2">
+              <div class="flex items-center gap-2">
+                <input :value="cat.name"
+                       @change="renameCategory(cat.name, $event.target.value)"
+                       type="text"
+                       class="flex-1 text-xs font-mono font-semibold bg-white border border-neutral-200
+                              rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400
+                              transition-shadow duration-150">
+                <button @click="removeCategory(cat.name)"
+                        class="text-neutral-300 hover:text-red-400 transition-colors duration-150 flex-shrink-0">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+                  </svg>
+                </button>
+              </div>
+              <textarea :value="cat.description"
+                        @input="updateCategoryDesc(cat.name, $event.target.value)"
+                        placeholder="Category description for embedding…" rows="2"
+                        class="w-full text-xs bg-white border border-neutral-200 rounded-lg
+                               px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400
+                               transition-shadow duration-150"></textarea>
+              <div>
+                <p class="text-[10px] font-medium text-neutral-400 mb-1.5">Intents in this category</p>
+                <div class="flex flex-wrap gap-x-3 gap-y-1.5">
+                  <template x-for="intent in intents" :key="intent.name">
+                    <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                      <input type="checkbox"
+                             :checked="(cat.intents || []).includes(intent.name)"
+                             @change="toggleIntentInCategory(cat.name, intent.name, $event.target.checked)"
+                             class="w-3 h-3 rounded accent-indigo-600 border-neutral-300
+                                    focus:ring-indigo-400 cursor-pointer">
+                      <span class="text-[11px] font-mono text-neutral-600" x-text="intent.name"></span>
+                    </label>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- ── Examples tab ──────────────────────────────────────────────── -->
+      <div x-show="activeTab === 'examples'" class="p-4 fade-in">
+        <div class="flex items-center justify-between mb-1">
+          <p class="text-[10px] font-bold text-neutral-400 uppercase tracking-widest">
+            Seed Examples (<span x-text="examples.length"></span>)
+          </p>
+          <button @click="addExample()"
+                  class="flex items-center gap-1 text-xs font-semibold text-indigo-600
+                         hover:text-indigo-800 transition-colors duration-150">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+            </svg>
+            Add
+          </button>
+        </div>
+        <p class="text-[11px] text-neutral-400 mb-3">
+          Used by ExampleStore for RAG retrieval.
+          <span class="text-neutral-300 ml-1">
+            <span x-text="examples.filter(e => e.history_context).length"></span> multi-turn,
+            <span x-text="examples.filter(e => !e.history_context).length"></span> single-turn.
+          </span>
+        </p>
+        <div x-show="cfg.mode === 'flat'"
+             class="mb-3 flex items-center gap-2 bg-amber-50 border border-amber-200
+                    rounded-lg px-3 py-2 text-[11px] text-amber-700">
+          <svg class="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9
+                 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
+          </svg>
+          Examples are only used in Flat+RAG and Hier+RAG modes.
+        </div>
+        <div class="space-y-2">
+          <template x-for="(ex, idx) in examples" :key="idx">
+            <div class="border border-neutral-100 bg-neutral-50 rounded-xl p-3 space-y-2">
+              <div class="flex items-center gap-2">
+                <select x-model="ex.intent" @change="onCfgChange()"
+                        class="flex-1 text-[11px] font-mono bg-white border border-neutral-200
+                               rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400
+                               transition-shadow duration-150">
+                  <template x-for="intent in intents" :key="intent.name">
+                    <option :value="intent.name" x-text="intent.name"></option>
+                  </template>
+                </select>
+                <button @click="removeExample(idx)"
+                        class="text-neutral-300 hover:text-red-400 transition-colors duration-150 flex-shrink-0">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+                  </svg>
+                </button>
+              </div>
+              <input x-model="ex.text" @input="onCfgChange()" type="text"
+                     placeholder="User utterance…"
+                     class="w-full text-xs bg-white border border-neutral-200 rounded-lg px-2.5 py-1.5
+                            focus:outline-none focus:ring-1 focus:ring-indigo-400 transition-shadow duration-150">
+              <input x-model="ex.history_context" @input="onCfgChange()" type="text"
+                     placeholder="History context (optional — for multi-turn follow-ups)"
+                     class="w-full text-xs bg-white border border-neutral-200 rounded-lg px-2.5 py-1.5
+                            focus:outline-none focus:ring-1 focus:ring-indigo-400 transition-shadow duration-150
+                            placeholder:italic placeholder:text-neutral-300">
+            </div>
+          </template>
+        </div>
+        <button @click="resetExamples()"
+                class="mt-4 w-full text-[11px] text-neutral-400 hover:text-neutral-600 py-2
+                       border border-dashed border-neutral-200 hover:border-neutral-400
+                       rounded-xl transition-all duration-150">
+          Reset to banking defaults
+        </button>
+      </div>
+
+    </div><!-- end tab content -->
+
+    <!-- Section 4: Sidebar footer -->
+    <div class="flex-shrink-0 border-t border-neutral-100 bg-neutral-50 px-4 py-3 space-y-2">
+      <!-- Session badge -->
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-1.5">
+          <div class="w-1.5 h-1.5 rounded-full"
+               :class="sessionId ? 'bg-emerald-400' : 'bg-neutral-300'"></div>
+          <span class="text-[10px] text-neutral-400 font-mono"
+                x-text="sessionId ? 'Session ' + sessionId.slice(0,8) + '…' : 'No session'"></span>
+        </div>
+        <span class="text-[10px] text-neutral-300">auto-clears in 1 hr</span>
+      </div>
+      <!-- Restoring notice -->
+      <div x-show="sessionRestoring"
+           class="text-[10px] text-indigo-500 flex items-center gap-1.5">
+        <svg class="w-3 h-3 spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+        </svg>
+        Restoring conversation…
+      </div>
+      <button @click="clearChat()"
+              class="w-full text-center text-[11px] font-semibold text-neutral-400
+                     hover:text-red-500 transition-colors duration-150 py-1">
+        New conversation
+      </button>
+    </div>
+  </aside>
+
+  <!-- ═══════════════════════════════════════════════════════ CHAT PANEL ═══ -->
+  <main class="flex-1 flex flex-col min-w-0 bg-slate-50">
+
+    <!-- Message feed -->
+    <div id="msgContainer"
+         class="flex-1 overflow-y-auto scroll-thin px-6 py-6 space-y-3">
+
+      <!-- Empty state -->
+      <div x-show="messages.length === 0"
+           class="h-full flex flex-col items-center justify-center text-center select-none fade-in">
+        <div class="w-16 h-16 rounded-2xl bg-white border border-neutral-200
+                    shadow-[0_1px_4px_rgba(0,0,0,0.06)] flex items-center justify-center">
+          <svg class="w-8 h-8 text-neutral-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+            <path stroke-linecap="round" stroke-linejoin="round"
+                  d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0
+                     012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/>
+          </svg>
+        </div>
+        <p class="mt-5 text-sm font-semibold text-neutral-500">Start a conversation</p>
+        <p class="mt-1 text-xs text-neutral-400 max-w-[280px] leading-relaxed">
+          Type any query or pick a suggestion below. The pipeline on the left controls how intent is detected.
+        </p>
+        <!-- Pipeline summary in empty state -->
+        <div class="mt-4 flex items-center gap-1.5 text-[10px]">
+          <span class="px-2 py-1 rounded font-semibold"
+                :class="{
+                  'bg-blue-50 text-blue-600': cfg.mode==='flat',
+                  'bg-violet-50 text-violet-600': cfg.mode==='flat_rag',
+                  'bg-emerald-50 text-emerald-600': cfg.mode==='hierarchical_rag',
+                }"
+                x-text="modeLabelFull(cfg.mode)"></span>
+          <span class="text-neutral-300">·</span>
+          <span class="px-2 py-1 rounded font-semibold"
+                :class="cfg.turnMode === 'multi' ? 'bg-amber-50 text-amber-600' : 'bg-neutral-100 text-neutral-400'"
+                x-text="cfg.turnMode === 'multi' ? 'Multi-Turn' : 'Single-Turn'"></span>
+          <span class="text-neutral-300">·</span>
+          <span class="text-neutral-400 font-mono" x-text="intents.length + ' intents'"></span>
+        </div>
+        <!-- Quick query chips -->
+        <div class="mt-6 flex flex-wrap gap-2 justify-center max-w-lg">
+          <template x-for="q in quickQueries" :key="q">
+            <button @click="sendQuery(q)"
+                    class="text-xs bg-white border border-neutral-200 rounded-full px-3 py-1.5
+                           shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all duration-150
+                           hover:border-indigo-300 hover:text-indigo-600
+                           hover:shadow-[0_0_0_3px_rgba(99,102,241,0.10)]"
+                    x-text="q"></button>
+          </template>
+        </div>
+      </div>
+
+      <!-- Messages -->
+      <template x-for="(msg, idx) in messages" :key="idx">
+        <div>
+
+          <!-- User bubble -->
+          <div x-show="msg.role === 'user'" class="flex justify-end bubble-enter">
+            <div class="max-w-sm bg-indigo-600 text-white text-sm px-4 py-2.5 leading-relaxed
+                        shadow-[0_1px_3px_rgba(99,102,241,0.25)]"
+                 style="border-radius: 16px 4px 16px 16px"
+                 x-text="msg.content"></div>
+          </div>
+
+          <!-- AI result card -->
+          <div x-show="msg.role === 'assistant'" class="flex justify-start card-enter">
+            <div class="w-full max-w-2xl bg-white border border-neutral-100 overflow-hidden
+                        shadow-[0_2px_8px_rgba(0,0,0,0.06)]"
+                 style="border-radius: 4px 16px 16px 16px"
+                 :style="`border-left: 4px solid ${confColor(msg.confidence)}`">
+
+              <!-- Card header: intent + confidence -->
+              <div class="flex items-center justify-between px-4 py-3 border-b border-neutral-50">
+                <div class="flex items-center gap-2 min-w-0">
+                  <div class="w-2 h-2 rounded-full flex-shrink-0"
+                       :style="`background:${confColor(msg.confidence)}`"></div>
+                  <span class="text-sm font-bold font-mono text-neutral-900 truncate"
+                        x-text="msg.intent || '—'"></span>
+                </div>
+                <div class="flex items-center gap-3 flex-shrink-0 ml-3">
+                  <!-- Category tags -->
+                  <template x-for="cat in (msg.categories || [])" :key="cat">
+                    <span class="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full
+                                 bg-emerald-50 text-emerald-700 border border-emerald-200"
+                          x-text="cat"></span>
+                  </template>
+                  <!-- Confidence bar + % -->
+                  <div class="flex items-center gap-2">
+                    <div class="w-24 h-1.5 bg-neutral-100 rounded-full overflow-hidden">
+                      <div class="conf-fill h-full rounded-full"
+                           :style="`width:${Math.round((msg.confidence||0)*100)}%; background:${confColor(msg.confidence)}`"></div>
+                    </div>
+                    <span class="text-xs font-bold tabular-nums"
+                          :style="`color:${confTextColor(msg.confidence)}`"
+                          x-text="Math.round((msg.confidence||0)*100) + '%'"></span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- RAG examples (collapsible) -->
+              <div x-show="msg.ragExamples && msg.ragExamples.length > 0"
+                   class="px-4 py-2.5 border-b border-neutral-50 bg-neutral-50/40">
+                <button @click="msg.showRag = !msg.showRag"
+                        class="flex items-center gap-1.5 text-[11px] text-neutral-400
+                               hover:text-neutral-600 transition-colors duration-150 w-full text-left">
+                  <svg class="w-3 h-3 flex-shrink-0 transition-transform duration-200"
+                       :class="msg.showRag ? 'rotate-90' : ''"
+                       fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
+                  </svg>
+                  <span x-text="`${(msg.ragExamples||[]).length} RAG examples retrieved`"></span>
+                </button>
+                <div x-show="msg.showRag"
+                     x-transition:enter="transition ease-out duration-200"
+                     x-transition:enter-start="opacity-0 -translate-y-1"
+                     x-transition:enter-end="opacity-100 translate-y-0"
+                     class="mt-2 space-y-1.5">
+                  <template x-for="(ex, i) in (msg.ragExamples||[])" :key="i">
+                    <div class="flex items-center gap-2 text-[11px]">
+                      <span class="font-mono px-1.5 py-0.5 bg-neutral-100 text-neutral-600
+                                   rounded flex-shrink-0" x-text="ex.intent"></span>
+                      <span class="text-neutral-500 flex-1 min-w-0 truncate italic"
+                            x-text="`"${ex.text}"`"></span>
+                      <span class="text-neutral-300 flex-shrink-0 tabular-nums"
+                            x-text="`${(ex.score*100).toFixed(0)}%`"></span>
+                    </div>
+                  </template>
+                </div>
+              </div>
+
+              <!-- Card footer: mode badges + timestamp -->
+              <div class="flex items-center justify-between px-4 py-2">
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                        :class="{
+                          'bg-blue-50 text-blue-600':      msg.mode==='flat',
+                          'bg-violet-50 text-violet-600':  msg.mode==='flat_rag',
+                          'bg-emerald-50 text-emerald-600':msg.mode==='hierarchical_rag',
+                        }"
+                        x-text="modeLabelFull(msg.mode)"></span>
+                  <span class="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                        :class="msg.turnMode==='multi'
+                          ? 'bg-amber-50 text-amber-600'
+                          : 'bg-neutral-50 text-neutral-400'"
+                        x-text="(msg.turnMode||'').toUpperCase()"></span>
+                </div>
+                <span class="text-[10px] text-neutral-300" x-text="msg.time"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Error card -->
+          <div x-show="msg.role === 'error'" class="flex justify-start fade-in">
+            <div class="max-w-2xl w-full bg-red-50 border border-red-100 flex items-start gap-2
+                        px-4 py-3"
+                 style="border-radius: 4px 16px 16px 16px">
+              <svg class="w-3.5 h-3.5 text-red-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293
+                     1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0
+                     00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
+              </svg>
+              <span class="text-xs text-red-600" x-text="msg.content"></span>
+            </div>
+          </div>
+
+        </div>
+      </template>
+
+      <!-- Loading card -->
+      <div x-show="loading" class="flex justify-start fade-in">
+        <div class="bg-white border border-neutral-100 px-4 py-3 flex items-center gap-2.5
+                    shadow-[0_2px_8px_rgba(0,0,0,0.06)]"
+             style="border-radius: 4px 16px 16px 16px">
+          <div class="flex gap-1">
+            <div class="w-2 h-2 bg-indigo-400 rounded-full dot-1"></div>
+            <div class="w-2 h-2 bg-indigo-400 rounded-full dot-2"></div>
+            <div class="w-2 h-2 bg-indigo-400 rounded-full dot-3"></div>
+          </div>
+          <span class="text-xs text-neutral-400">Classifying…</span>
+        </div>
+      </div>
+
+    </div><!-- end message feed -->
+
+    <!-- Pipeline visualizer -->
+    <div class="flex-shrink-0 bg-white border-t border-neutral-100 px-6 flex items-center gap-2"
+         style="height:52px">
+      <span class="text-[10px] text-neutral-300 font-semibold uppercase tracking-wider mr-1">Pipeline</span>
+      <template x-for="(node, idx) in pipelineNodes" :key="node.id">
+        <div class="flex items-center gap-2">
+          <span class="text-[10px] font-semibold px-2 py-1 rounded-md transition-all duration-200"
+                :class="[
+                  node.active ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' : 'bg-neutral-50 text-neutral-300 border border-neutral-100',
+                  loading && node.active ? 'pipeline-node-pulse' : ''
+                ]"
+                x-text="node.label"></span>
+          <span x-show="idx < pipelineNodes.length - 1"
+                class="text-[10px] text-neutral-300 select-none">→</span>
+        </div>
+      </template>
+    </div>
+
+    <!-- Input bar -->
+    <div class="flex-shrink-0 bg-white border-t border-neutral-200 px-5 py-4">
+      <div class="flex gap-3">
+        <input x-model="input"
+               @keydown.enter.prevent="send()"
+               :disabled="loading"
+               type="text"
+               placeholder="Type a query and press Enter…"
+               class="flex-1 text-sm border border-neutral-200 rounded-xl px-4 py-2.5 bg-white
+                      focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent
+                      disabled:opacity-50 disabled:cursor-not-allowed transition-shadow duration-150">
+        <button @click="send()"
+                :disabled="loading || !input.trim()"
+                class="send-btn w-11 h-11 bg-indigo-600 rounded-xl flex items-center justify-center
+                       hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed
+                       transition-all duration-150 flex-shrink-0">
+          <svg x-show="!loading" class="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+          </svg>
+          <svg x-show="loading" class="w-4 h-4 text-white spin" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+          </svg>
+        </button>
+      </div>
+      <div class="mt-2 flex items-center justify-center gap-3 text-[10px] text-neutral-300">
+        <span>Press <kbd class="px-1.5 py-0.5 bg-neutral-100 rounded text-[10px] font-mono text-neutral-400">Enter</kbd> to send</span>
+        <span x-show="cfg.turnMode === 'multi'" class="flex items-center gap-1.5 text-amber-400">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0"></span>
+          Multi-turn: conversation history is maintained
+        </span>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════ SCRIPT ═════ -->
+<script>
+/* ── Defaults ─────────────────────────────────────────────────────────────── */
+const DEFAULT_INTENTS = [
+  { name: 'check_balance',   description: 'User wants to check their account balance.' },
+  { name: 'bank_statement',  description: 'User wants to download or view a bank statement.' },
+  { name: 'transfer_money',  description: 'User wants to transfer money to another account.' },
+  { name: 'block_card',      description: 'User wants to block a lost or stolen card.' },
+  { name: 'apply_loan',      description: 'User wants to apply for a loan.' },
+  { name: 'contact_support', description: 'User wants to speak to a human support agent.' },
+];
+
+const DEFAULT_HIERARCHY = {
+  accounts:     { description: 'Managing bank accounts: balance and statements.', intents: ['check_balance', 'bank_statement'] },
+  transactions: { description: 'Money movement: transfers and payments.',          intents: ['transfer_money'] },
+  cards:        { description: 'Card management: block or unblock a card.',        intents: ['block_card'] },
+  loans:        { description: 'Borrowing: loan applications and repayments.',     intents: ['apply_loan'] },
+  support:      { description: 'Customer support and human agent escalation.',     intents: ['contact_support'] },
+};
+
+const DEFAULT_EXAMPLES = [
+  { text: 'what is my account balance',       intent: 'check_balance',   history_context: '' },
+  { text: 'how much money do I have',         intent: 'check_balance',   history_context: '' },
+  { text: 'I need my bank statement',         intent: 'bank_statement',  history_context: '' },
+  { text: 'download statement last month',    intent: 'bank_statement',  history_context: '' },
+  { text: 'transfer money to my savings',     intent: 'transfer_money',  history_context: '' },
+  { text: 'send 500 dollars to john',         intent: 'transfer_money',  history_context: '' },
+  { text: 'block my lost card',               intent: 'block_card',      history_context: '' },
+  { text: 'freeze my credit card',            intent: 'block_card',      history_context: '' },
+  { text: 'apply for a personal loan',        intent: 'apply_loan',      history_context: '' },
+  { text: 'speak to customer support',        intent: 'contact_support', history_context: '' },
+  { text: 'for last 6 months',                intent: 'bank_statement',  history_context: 'I need my bank statement' },
+  { text: 'yes block it now',                 intent: 'block_card',      history_context: 'my card was stolen' },
+  { text: 'the one ending in 4521',           intent: 'block_card',      history_context: 'I want to block a card' },
+];
+
+const CONF_COLORS = {
+  high:   { border: '#4ADE80', text: '#16A34A' },  // green-400 / green-600
+  medium: { border: '#FBBF24', text: '#D97706' },  // amber-400 / amber-600
+  low:    { border: '#F87171', text: '#DC2626' },  // red-400   / red-600
+};
+
+function clone(obj) { return JSON.parse(JSON.stringify(obj)); }
+
+/* ── Alpine App ───────────────────────────────────────────────────────────── */
+function app() {
+  return {
+
+    /* ── Config ─────────────────────────────────────────────────────────── */
+    cfg: {
+      llmProvider:  'openai',
+      llmBaseUrl:   'https://api.openai.com',
+      llmModelName: 'gpt-4o-mini',
+      llmApiKey:    '',
+      mode:         'flat',
+      turnMode:     'single',
+    },
+
+    intents:   clone(DEFAULT_INTENTS),
+    hierarchy: clone(DEFAULT_HIERARCHY),
+    examples:  clone(DEFAULT_EXAMPLES),
+
+    /* ── UI state ────────────────────────────────────────────────────────── */
+    messages:                [],
+    input:                   '',
+    loading:                 false,
+    activeTab:               'llm',
+    cfgDirty:                false,
+    ollamaModels:            [],
+    ollamaModelsLoading:     false,
+    ollamaFetchError:        '',
+    openrouterModels:        [],
+    openrouterModelsLoading: false,
+    openrouterFetchError:    '',
+    openrouterFreeCount:     0,
+    sessionId:               '',
+    sessionRestoring:        false,
+
+    /* ── Static ──────────────────────────────────────────────────────────── */
+    modes: [
+      { value: 'flat',             label: 'Flat'     },
+      { value: 'flat_rag',         label: 'Flat+RAG' },
+      { value: 'hierarchical_rag', label: 'Hier+RAG' },
+    ],
+
+    llmPresets: [
+      { label: 'OpenAI',        model: 'gpt-4o-mini',                         baseUrl: 'https://api.openai.com',      provider: 'openai'      },
+      { label: 'Groq',          model: 'llama3-8b-8192',                      baseUrl: 'https://api.groq.com/openai', provider: 'openai'      },
+      { label: 'Together',      model: 'meta-llama/Llama-3-8b-chat-hf',       baseUrl: 'https://api.together.xyz',    provider: 'openai'      },
+      { label: 'OpenRouter',    model: 'openai/gpt-4o-mini',                  baseUrl: 'https://openrouter.ai/api',   provider: 'openrouter'  },
+      { label: 'OR Free Llama', model: 'meta-llama/llama-3.1-8b-instruct:free', baseUrl: 'https://openrouter.ai/api', provider: 'openrouter' },
+      { label: 'Ollama',        model: 'llama3',                               baseUrl: 'http://localhost:11434',     provider: 'ollama'      },
+    ],
+
+    quickQueries: [
+      'how much money do I have?',
+      'I need my bank statement',
+      'block my stolen card',
+      'apply for a home loan',
+      'connect me to a human agent',
+    ],
+
+    /* ── Computed ────────────────────────────────────────────────────────── */
+    get hierarchyList() {
+      return Object.entries(this.hierarchy).map(([name, data]) => ({ name, ...data }));
+    },
+
+    get computedTabs() {
+      return [
+        { id: 'llm',       label: 'LLM',       locked: false, lockedMsg: '', count: null },
+        { id: 'intents',   label: 'Intents',   locked: false, lockedMsg: '', count: this.intents.length },
+        {
+          id: 'hierarchy', label: 'Hierarchy',
+          locked: this.cfg.mode !== 'hierarchical_rag',
+          lockedMsg: 'Only used in Hierarchical+RAG mode',
+          count: Object.keys(this.hierarchy).length,
+        },
+        { id: 'examples',  label: 'Examples',  locked: false, lockedMsg: '', count: this.examples.length },
+      ];
+    },
+
+    get pipelineNodes() {
+      const m = this.cfg.mode;
+      return [
+        { id: 'embed',  label: 'Embed',  active: true },
+        { id: 'router', label: 'Router', active: true },
+        { id: 'hier',   label: 'Hier',   active: m === 'hierarchical_rag' },
+        { id: 'rag',    label: 'Store',  active: m !== 'flat' },
+        { id: 'llm',    label: 'LLM',    active: true },
+        { id: 'intent', label: 'Intent', active: true },
+      ];
+    },
+
+    /* ── Helpers ─────────────────────────────────────────────────────────── */
+    modeLabelFull(mode) {
+      return { flat: 'FLAT', flat_rag: 'FLAT+RAG', hierarchical_rag: 'HIER+RAG' }[mode] || mode;
+    },
+
+    confColor(c) {
+      const level = c > .75 ? 'high' : c > .50 ? 'medium' : 'low';
+      return CONF_COLORS[level].border;
+    },
+
+    confTextColor(c) {
+      const level = c > .75 ? 'high' : c > .50 ? 'medium' : 'low';
+      return CONF_COLORS[level].text;
+    },
+
+    onCfgChange() {
+      this.cfgDirty = true;
+      // Auto-unlock tab: if user was on hierarchy and switches mode away, go back to LLM
+      if (this.cfg.mode !== 'hierarchical_rag' && this.activeTab === 'hierarchy') {
+        this.activeTab = 'llm';
+      }
+      try { localStorage.setItem('reic_cfg', JSON.stringify(this.cfg)); } catch (_) {}
+    },
+
+    applyPreset(p) {
+      this.cfg.llmProvider    = p.provider;
+      this.cfg.llmBaseUrl     = p.baseUrl;
+      this.cfg.llmModelName   = p.model;
+      this.ollamaModels       = [];
+      this.ollamaFetchError   = '';
+      this.openrouterModels   = [];
+      this.openrouterFetchError = '';
+      if (p.provider === 'ollama')      this.fetchOllamaModels();
+      if (p.provider === 'openrouter')  this.fetchOpenRouterModels();
+    },
+
+    async fetchOpenRouterModels() {
+      this.openrouterModelsLoading = true;
+      this.openrouterFetchError    = '';
+      this.openrouterModels        = [];
+      try {
+        const key = encodeURIComponent(this.cfg.llmApiKey || '');
+        const r   = await fetch(`/api/openrouter/models?api_key=${key}`);
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({ detail: `HTTP ${r.status}` }));
+          throw new Error(err.detail || `HTTP ${r.status}`);
+        }
+        const data = await r.json();
+        this.openrouterModels   = data.models || [];
+        this.openrouterFreeCount = data.free_count || 0;
+        // Auto-select first if current isn't in list
+        if (this.openrouterModels.length > 0 && !this.openrouterModels.includes(this.cfg.llmModelName)) {
+          this.cfg.llmModelName = this.openrouterModels[0];
+        }
+      } catch (err) {
+        this.openrouterFetchError = err.message;
+      } finally {
+        this.openrouterModelsLoading = false;
+      }
+    },
+
+    async fetchOllamaModels() {
+      this.ollamaModelsLoading = true;
+      this.ollamaFetchError    = '';
+      this.ollamaModels        = [];
+      try {
+        const url = `/api/ollama/models?base_url=${encodeURIComponent(this.cfg.llmBaseUrl)}`;
+        const r   = await fetch(url);
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({ detail: `HTTP ${r.status}` }));
+          throw new Error(err.detail || `HTTP ${r.status}`);
+        }
+        const data        = await r.json();
+        this.ollamaModels = data.models || [];
+        // Auto-select first model if current isn't in the list
+        if (this.ollamaModels.length > 0 && !this.ollamaModels.includes(this.cfg.llmModelName)) {
+          this.cfg.llmModelName = this.ollamaModels[0];
+        }
+      } catch (err) {
+        this.ollamaFetchError = err.message;
+      } finally {
+        this.ollamaModelsLoading = false;
+      }
+    },
+
+    async clearChat() {
+      this.messages = [];
+      // Start a brand-new session so history is clean server-side too
+      if (this.sessionId) {
+        try { await fetch(`/api/sessions/${this.sessionId}`, { method: 'DELETE' }); } catch (_) {}
+      }
+      await this._createSession();
+    },
+
+    scrollToBottom() {
+      this.$nextTick(() => {
+        const c = document.getElementById('msgContainer');
+        if (c) c.scrollTop = c.scrollHeight;
+      });
+    },
+
+    /* ── Init ────────────────────────────────────────────────────────────── */
+    async init() {
+      // Restore saved LLM config
+      try {
+        const saved = JSON.parse(localStorage.getItem('reic_cfg') || '{}');
+        Object.assign(this.cfg, saved);
+      } catch (_) {}
+
+      // Restore or create session
+      const storedSid = localStorage.getItem('reic_session_id');
+      if (storedSid) {
+        this.sessionRestoring = true;
+        try {
+          const r = await fetch(`/api/sessions/${storedSid}`);
+          if (r.ok) {
+            const data = await r.json();
+            this.sessionId = storedSid;
+            // Rebuild messages from stored turns
+            for (const turn of data.turns) {
+              if (turn.role === 'user') {
+                this.messages.push({ role: 'user', content: turn.content });
+              } else if (turn.role === 'assistant') {
+                this.messages.push({
+                  role:        'assistant',
+                  intent:      turn.intent_classified || turn.content,
+                  confidence:  turn.confidence  || 0,
+                  ragExamples: turn.rag_examples || [],
+                  categories:  turn.matched_categories || [],
+                  mode:        turn.mode     || 'flat',
+                  turnMode:    turn.turn_mode || 'single',
+                  showRag:     false,
+                  time:        '(restored)',
+                });
+              }
+            }
+            this.scrollToBottom();
+          } else {
+            // Expired or not found — create fresh
+            await this._createSession();
+          }
+        } catch (_) {
+          await this._createSession();
+        } finally {
+          this.sessionRestoring = false;
+        }
+      } else {
+        await this._createSession();
+      }
+    },
+
+    async _createSession() {
+      try {
+        const r = await fetch('/api/sessions', { method: 'POST' });
+        const d = await r.json();
+        this.sessionId = d.session_id;
+        localStorage.setItem('reic_session_id', this.sessionId);
+      } catch (_) {}
+    },
+
+    /* ── Intents CRUD ────────────────────────────────────────────────────── */
+    addIntent() {
+      this.intents.push({ name: 'new_intent', description: '' });
+      this.onCfgChange();
+    },
+    removeIntent(idx) {
+      const name = this.intents[idx]?.name;
+      this.intents.splice(idx, 1);
+      if (name) {
+        for (const cat of Object.values(this.hierarchy))
+          cat.intents = (cat.intents || []).filter(n => n !== name);
+        this.examples = this.examples.filter(e => e.intent !== name);
+      }
+      this.onCfgChange();
+    },
+    resetIntents() {
+      this.intents = clone(DEFAULT_INTENTS);
+      this.onCfgChange();
+    },
+
+    /* ── Hierarchy CRUD ──────────────────────────────────────────────────── */
+    addCategory() {
+      const key = 'new_category';
+      let finalKey = key, n = 1;
+      while (this.hierarchy[finalKey]) finalKey = key + '_' + (n++);
+      this.hierarchy = { ...this.hierarchy, [finalKey]: { description: '', intents: [] } };
+      this.onCfgChange();
+    },
+    removeCategory(name) {
+      const h = { ...this.hierarchy };
+      delete h[name];
+      this.hierarchy = h;
+      this.onCfgChange();
+    },
+    renameCategory(oldName, newName) {
+      newName = (newName || '').trim();
+      if (!newName || newName === oldName) return;
+      const h = {};
+      for (const [k, v] of Object.entries(this.hierarchy))
+        h[k === oldName ? newName : k] = v;
+      this.hierarchy = h;
+      this.onCfgChange();
+    },
+    updateCategoryDesc(name, desc) {
+      if (this.hierarchy[name]) {
+        this.hierarchy[name].description = desc;
+        this.onCfgChange();
+      }
+    },
+    toggleIntentInCategory(catName, intentName, checked) {
+      const cat = this.hierarchy[catName];
+      if (!cat) return;
+      const set = new Set(cat.intents || []);
+      checked ? set.add(intentName) : set.delete(intentName);
+      cat.intents = [...set];
+      this.onCfgChange();
+    },
+
+    /* ── Examples CRUD ───────────────────────────────────────────────────── */
+    addExample() {
+      this.examples.push({ text: '', intent: this.intents[0]?.name || '', history_context: '' });
+      this.onCfgChange();
+    },
+    removeExample(idx) {
+      this.examples.splice(idx, 1);
+      this.onCfgChange();
+    },
+    resetExamples() {
+      this.examples = clone(DEFAULT_EXAMPLES);
+      this.onCfgChange();
+    },
+
+    /* ── Classify ────────────────────────────────────────────────────────── */
+    sendQuery(q) { this.input = q; this.send(); },
+
+    async send() {
+      const text = this.input.trim();
+      if (!text || this.loading) return;
+      this.input = '';
+
+      this.messages.push({ role: 'user', content: text });
+      this.scrollToBottom();
+      this.loading = true;
+
+      const payload = {
+        text,
+        mode:          this.cfg.mode,
+        turn_mode:     this.cfg.turnMode,
+        intents:       this.intents,
+        hierarchy:     this.cfg.mode === 'hierarchical_rag' ? this.hierarchy : null,
+        examples:      this.examples
+          .filter(e => e.text.trim())
+          .map(e => ({ ...e, history_context: e.history_context || null })),
+        session_id:    this.sessionId || null,
+        llm_base_url:  this.cfg.llmBaseUrl,
+        llm_model_name: this.cfg.llmModelName,
+        llm_api_key:   this.cfg.llmApiKey,
+        llm_provider:  this.cfg.llmProvider,
+      };
+
+      try {
+        const r = await fetch('/api/classify', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify(payload),
+        });
+
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({ detail: `HTTP ${r.status}: ${r.statusText}` }));
+          throw new Error(err.detail || `HTTP ${r.status}`);
+        }
+
+        const data = await r.json();
+        this.cfgDirty = false;
+
+        // Keep session_id in sync (server may have issued a new one if ours expired)
+        if (data.session_id && data.session_id !== this.sessionId) {
+          this.sessionId = data.session_id;
+          localStorage.setItem('reic_session_id', this.sessionId);
+        }
+
+        this.messages.push({
+          role:        'assistant',
+          intent:      data.intent,
+          confidence:  data.confidence,
+          ragExamples: data.rag_examples    || [],
+          categories:  data.matched_categories || [],
+          mode:        this.cfg.mode,
+          turnMode:    this.cfg.turnMode,
+          showRag:     false,
+          time:        new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        });
+
+      } catch (err) {
+        this.messages.push({
+          role:    'error',
+          content: 'Classification failed: ' + err.message,
+        });
+      } finally {
+        this.loading = false;
+        this.scrollToBottom();
+      }
+    },
+
+  }; // end return
+}
+</script>
+</body>
+</html>
