@@ -8,4 +8,8 @@ services:
     envVars:
       - key: PORT
         value: 8000
+      - key: EMBEDDING_PROVIDER
+        value: jina
+      - key: JINA_API_KEY
+        sync: false  # set manually in Render dashboard
     healthCheckPath: /
