@@ -9,7 +9,9 @@ services:
       - key: PORT
         value: 8000
       - key: EMBEDDING_PROVIDER
-        value: jina
-      - key: JINA_API_KEY
-        sync: false  # set manually in Render dashboard
+        value: jina          # change to: openai | cohere | voyageai | ollama | local
+      - key: EMBEDDING_API_KEY
+        sync: false          # set in Render dashboard — API key for chosen provider
+      - key: EMBEDDING_MODEL
+        sync: false          # optional: override the provider's default model
     healthCheckPath: /
