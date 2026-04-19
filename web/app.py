@@ -252,12 +252,16 @@ async def _call_ollama(prompt: str, base_url: str, model: str, api_key: str) -> 
     """Local Ollama instance."""
     import ollama
 
+    import asyncio
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     client = ollama.AsyncClient(host=base_url, headers=headers)
-    r = await client.chat(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        options={"temperature": 0.1},
+    r = await asyncio.wait_for(
+        client.chat(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            options={"temperature": 0.1},
+        ),
+        timeout=30.0,
     )
     return r["message"]["content"]
 
