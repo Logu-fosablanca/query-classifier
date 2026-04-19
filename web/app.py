@@ -260,7 +260,6 @@ async def _call_ollama(prompt: str, base_url: str, model: str, api_key: str) -> 
             model=model,
             messages=[{"role": "user", "content": prompt}],
             options={"temperature": 0.1},
-            think=False,  # disable Qwen3 thinking mode (ignored by other models)
         ),
         timeout=30.0,
     )
