@@ -257,7 +257,7 @@ async def _call_ollama(prompt: str, base_url: str, model: str, api_key: str) -> 
     r = await client.chat(
         model=model,
         messages=[{"role": "user", "content": prompt}],
-        options={"num_ctx": 8192, "temperature": 0.1},
+        options={"temperature": 0.1},
     )
     return r["message"]["content"]
 
