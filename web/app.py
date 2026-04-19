@@ -390,13 +390,18 @@ async def classify(req: ClassifyRequest):
                 prompt, req.llm_base_url, req.llm_model_name, req.llm_api_key
             )
 
-        # 8. Parse JSON response
-        result = clf._extract_json(content)
-        intent_name = result.get(
-            "name",
-            top_matches[0]["intent"]["name"] if top_matches else "unknown",
-        )
-        confidence = float(result.get("confidence", 0.5))
+        # 8. Parse JSON response — fall back to top semantic match on failure
+        fallback_intent = top_matches[0]["intent"]["name"] if top_matches else "unknown"
+        fallback_confidence = float(top_matches[0]["score"]) if top_matches else 0.0
+        try:
+            logger.info(f"LLM raw response: {content[:300]}")
+            result = clf._extract_json(content)
+            intent_name = result.get("name", fallback_intent)
+            confidence = float(result.get("confidence", 0.5))
+        except ValueError:
+            logger.warning(f"JSON parse failed — using top semantic match: {fallback_intent}")
+            intent_name = fallback_intent
+            confidence = fallback_confidence
 
         # 9. Confidence blend (REIC: ground LLM confidence with retrieval evidence)
         if rag_examples and RAG_CONFIDENCE_BLEND > 0:
