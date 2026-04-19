@@ -490,8 +490,12 @@ async def ollama_models(base_url: str = "http://localhost:11434"):
             r = await client.get(base_url.rstrip("/") + "/api/tags")
             r.raise_for_status()
             data = r.json()
-            names = [m["name"] for m in data.get("models", [])]
-            return {"models": names}
+            models = [
+                {"name": m["name"], "size": m.get("size", 0)}
+                for m in data.get("models", [])
+            ]
+            models.sort(key=lambda m: m["size"])  # smallest first
+            return {"models": [m["name"] for m in models], "models_detail": models}
     except httpx.ConnectError:
         raise HTTPException(status_code=503, detail="Cannot reach Ollama at " + base_url)
     except Exception as e:

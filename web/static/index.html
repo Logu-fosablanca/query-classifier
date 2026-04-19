@@ -1113,10 +1113,11 @@ function app() {
           throw new Error(err.detail || `HTTP ${r.status}`);
         }
         const data        = await r.json();
-        this.ollamaModels = data.models || [];
-        // Auto-select first model if current isn't in the list
+        this.ollamaModels = data.models || [];  // already sorted smallest first by backend
+        // Auto-select smallest model if current model isn't available
         if (this.ollamaModels.length > 0 && !this.ollamaModels.includes(this.cfg.llmModelName)) {
           this.cfg.llmModelName = this.ollamaModels[0];
+          this.saveConfig();
         }
       } catch (err) {
         this.ollamaFetchError = err.message;
@@ -1148,6 +1149,11 @@ function app() {
         const saved = JSON.parse(localStorage.getItem('reic_cfg') || '{}');
         Object.assign(this.cfg, saved);
       } catch (_) {}
+
+      // Auto-fetch Ollama models on startup so smallest is pre-selected
+      if (this.cfg.llmProvider === 'ollama') {
+        this.fetchOllamaModels();  // non-blocking, runs in background
+      }
 
       // Restore or create session
       const storedSid = localStorage.getItem('reic_session_id');
