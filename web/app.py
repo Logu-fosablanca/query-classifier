@@ -103,6 +103,7 @@ class ClassifyRequest(BaseModel):
 class ClassifyResponse(BaseModel):
     intent: str
     confidence: float
+    reasoning: str = ""
     language: str = "unknown"
     rag_examples: List[dict] = []
     matched_categories: List[str] = []
@@ -393,11 +394,13 @@ async def classify(req: ClassifyRequest):
         # 8. Parse JSON response — fall back to top semantic match on failure
         fallback_intent = top_matches[0]["intent"]["name"] if top_matches else "unknown"
         fallback_confidence = float(top_matches[0]["score"]) if top_matches else 0.0
+        reasoning = ""
         try:
             logger.info(f"LLM raw response: {content[:300]}")
             result = clf._extract_json(content)
             intent_name = result.get("name", fallback_intent)
             confidence = float(result.get("confidence", 0.5))
+            reasoning = result.get("reasoning", "")
         except ValueError:
             logger.warning(f"JSON parse failed — using top semantic match: {fallback_intent}")
             intent_name = fallback_intent
@@ -416,6 +419,7 @@ async def classify(req: ClassifyRequest):
         await append_turn(sid, "assistant", intent_name, metadata={
             "intent_classified":  intent_name,
             "confidence":         confidence,
+            "reasoning":          reasoning,
             "matched_categories": matched_categories,
             "mode":               req.mode,
             "turn_mode":          req.turn_mode,
@@ -425,6 +429,7 @@ async def classify(req: ClassifyRequest):
         return ClassifyResponse(
             intent=intent_name,
             confidence=confidence,
+            reasoning=reasoning,
             rag_examples=rag_examples,
             matched_categories=matched_categories,
             session_id=sid,

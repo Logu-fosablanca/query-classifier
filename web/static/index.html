@@ -749,6 +749,13 @@
                 </div>
               </div>
 
+              <!-- Reasoning -->
+              <div x-show="msg.reasoning"
+                   class="px-4 py-2.5 border-b border-neutral-50 bg-amber-50/40">
+                <p class="text-[11px] text-amber-800 italic leading-relaxed"
+                   x-text="`💡 ${msg.reasoning}`"></p>
+              </div>
+
               <!-- RAG examples (collapsible) -->
               <div x-show="msg.ragExamples && msg.ragExamples.length > 0"
                    class="px-4 py-2.5 border-b border-neutral-50 bg-neutral-50/40">
@@ -1151,6 +1158,7 @@ function app() {
                   confidence:  turn.confidence  || 0,
                   ragExamples: turn.rag_examples || [],
                   categories:  turn.matched_categories || [],
+                  reasoning:   turn.reasoning || '',
                   mode:        turn.mode     || 'flat',
                   turnMode:    turn.turn_mode || 'single',
                   showRag:     false,
@@ -1309,6 +1317,7 @@ function app() {
           confidence:  data.confidence,
           ragExamples: data.rag_examples    || [],
           categories:  data.matched_categories || [],
+          reasoning:   data.reasoning          || '',
           mode:        this.cfg.mode,
           turnMode:    this.cfg.turnMode,
           showRag:     false,
